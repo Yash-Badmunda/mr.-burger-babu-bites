@@ -49,28 +49,40 @@ export const Route = createFileRoute("/api/order")({
         }
 
         const itemText = lines.map((line) => `${line.name} × ${line.quantity} — ₹${line.lineTotal}`).join("\n");
-        const response = await fetch("https://connector-gateway.lovable.dev/resend/emails", {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${lovableKey}`,
-            "X-Connection-Api-Key": resendKey,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            from: "Mr. Burger Babu <orders@mrburgerbabu.in>",
-            to: ["sunnysodhi060@gmail.com"],
-            subject: "New Order - Mr. Burger Babu",
-            text: `NEW ORDER\n\nCustomer: ${parsed.data.name}\nPhone: ${parsed.data.phone}\n\nItems:\n${itemText}\n\nTOTAL: ₹${total}\n\nNote: ${parsed.data.note || "No additional note"}\n\nOrder date/time: ${orderedAt}`,
-            html: `<div style="font-family:Arial,sans-serif;max-width:620px;margin:auto;color:#173f2b"><h1>NEW ORDER</h1><p><strong>Customer:</strong> ${escapeHtml(parsed.data.name)}<br/><strong>Phone:</strong> ${escapeHtml(parsed.data.phone)}</p><h2>Items</h2><ul>${lines.map((line) => `<li>${escapeHtml(line.name)} × ${line.quantity} — ₹${line.lineTotal}</li>`).join("")}</ul><h2>TOTAL: ₹${total}</h2><p><strong>Note:</strong> ${escapeHtml(parsed.data.note || "No additional note")}</p><p><strong>Order date/time:</strong> ${escapeHtml(orderedAt)}</p></div>`,
-          }),
-        });
+        const payload = {
+          subject: "New Order - Mr. Burger Babu",
+          text: `NEW ORDER\n\nCustomer: ${parsed.data.name}\nPhone: ${parsed.data.phone}\n\nItems:\n${itemText}\n\nTOTAL: ₹${total}\n\nNote: ${parsed.data.note || "No additional note"}\n\nOrder date/time: ${orderedAt}`,
+          html: `<div style="font-family:Arial,sans-serif;max-width:620px;margin:auto;color:#173f2b"><h1>NEW ORDER</h1><p><strong>Customer:</strong> ${escapeHtml(parsed.data.name)}<br/><strong>Phone:</strong> ${escapeHtml(parsed.data.phone)}</p><h2>Items</h2><ul>${lines.map((line) => `<li>${escapeHtml(line.name)} × ${line.quantity} — ₹${line.lineTotal}</li>`).join("")}</ul><h2>TOTAL: ₹${total}</h2><p><strong>Note:</strong> ${escapeHtml(parsed.data.note || "No additional note")}</p><p><strong>Order date/time:</strong> ${escapeHtml(orderedAt)}</p></div>`,
+        };
+
+        const send = (from: string, to: string[]) =>
+          fetch("https://connector-gateway.lovable.dev/resend/emails", {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${lovableKey}`,
+              "X-Connection-Api-Key": resendKey,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ from, to, ...payload }),
+          });
+
+        const primaryFrom = process.env['RESEND_FROM_EMAIL'] || "Mr. Burger Babu <orders@mrburgerbabu.in>";
+        const fallbackTo = process.env['RESEND_FALLBACK_TO'] || "yashbadmunda@gmail.com";
+        let response = await send(primaryFrom, ["sunnysodhi060@gmail.com"]);
+
+        if (response.status === 403) {
+          console.error(`Resend order email failed [403] with ${primaryFrom}: ${await response.text()}`);
+          // Sending domain is not verified yet — use Resend's shared sender, which can
+          // only deliver to the Resend account owner, so the order is never lost.
+          response = await send("Mr. Burger Babu <onboarding@resend.dev>", [fallbackTo]);
+        }
 
         if (!response.ok) {
-          const details = await response.text();
-          console.error(`Resend order email failed [${response.status}]: ${details}`);
-          const domainIssue = response.status === 403;
-          return Response.json({ error: domainIssue ? "Email sender setup is not complete yet. Please order on WhatsApp." : "We couldn't email this order. Please try WhatsApp instead." }, { status: 502 });
+          console.error(`Resend order email failed [${response.status}]: ${await response.text()}`);
+          return Response.json({ error: "We couldn't email this order. Please send it on WhatsApp instead." }, { status: 502 });
         }
+
+
 
         return Response.json({ ok: true, total });
       },
