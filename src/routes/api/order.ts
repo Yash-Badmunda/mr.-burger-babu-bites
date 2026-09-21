@@ -66,7 +66,7 @@ export const Route = createFileRoute("/api/order")({
             body: JSON.stringify({ from, to, ...payload }),
           });
 
-        const primaryFrom = process.env['RESEND_FROM_EMAIL'] || "Mr. Burger Babu <orders@mrburgerbabu.in>";
+        const primaryFrom = process.env['RESEND_FROM_EMAIL'] || "Mr. Burger Babu <orders@mr.burgerbabu.in>";
         const fallbackTo = process.env['RESEND_FALLBACK_TO'] || "yashbadmunda@gmail.com";
         let response = await send(primaryFrom, ["sunnysodhi060@gmail.com"]);
 
