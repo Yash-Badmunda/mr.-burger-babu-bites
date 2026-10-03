@@ -56,13 +56,13 @@ export const Route = createFileRoute("/api/order")({
         if (rawBody.length > MAX_ORDER_BODY_BYTES) {
           return Response.json({ error: "Order request is too large." }, { status: 413 });
         }
-        let payload: unknown = null;
+        let requestPayload: unknown = null;
         try {
-          payload = JSON.parse(rawBody);
+          requestPayload = JSON.parse(rawBody);
         } catch {
           // The schema below returns the same safe validation message.
         }
-        const parsed = orderSchema.safeParse(payload);
+        const parsed = orderSchema.safeParse(requestPayload);
         if (!parsed.success) {
           return Response.json({ error: "Please check your name, phone number and cart." }, { status: 400 });
         }
