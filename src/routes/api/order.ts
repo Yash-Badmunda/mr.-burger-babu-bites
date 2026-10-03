@@ -9,6 +9,29 @@ const orderSchema = z.object({
   items: z.array(z.object({ id: z.string().max(80), quantity: z.number().int().min(1).max(20) })).min(1).max(52),
 });
 
+const ORDER_WINDOW_MS = 10 * 60 * 1000;
+const MAX_ORDERS_PER_WINDOW = 5;
+const MAX_ORDER_BODY_BYTES = 16 * 1024;
+const orderAttempts = new Map<string, { count: number; resetAt: number }>();
+
+function getClientKey(request: Request): string {
+  const forwarded = request.headers.get("x-forwarded-for");
+  return forwarded?.split(",")[0]?.trim() || request.headers.get("x-real-ip") || "unknown";
+}
+
+function canSubmitOrder(request: Request): boolean {
+  const now = Date.now();
+  const key = getClientKey(request);
+  const current = orderAttempts.get(key);
+  if (!current || current.resetAt <= now) {
+    orderAttempts.set(key, { count: 1, resetAt: now + ORDER_WINDOW_MS });
+    return true;
+  }
+  if (current.count >= MAX_ORDERS_PER_WINDOW) return false;
+  current.count += 1;
+  return true;
+}
+
 const escapeHtml = (value: string) =>
   value.replace(/[&<>'"]/g, (character) => ({
     "&": "&amp;",
@@ -22,7 +45,24 @@ export const Route = createFileRoute("/api/order")({
   server: {
     handlers: {
       POST: async ({ request }) => {
-        const parsed = orderSchema.safeParse(await request.json().catch(() => null));
+        const contentLength = Number(request.headers.get("content-length") || "0");
+        if (!Number.isFinite(contentLength) || contentLength > MAX_ORDER_BODY_BYTES) {
+          return Response.json({ error: "Order request is too large." }, { status: 413 });
+        }
+        if (!canSubmitOrder(request)) {
+          return Response.json({ error: "Too many order attempts. Please try again later." }, { status: 429 });
+        }
+        const rawBody = await request.text();
+        if (rawBody.length > MAX_ORDER_BODY_BYTES) {
+          return Response.json({ error: "Order request is too large." }, { status: 413 });
+        }
+        let payload: unknown = null;
+        try {
+          payload = JSON.parse(rawBody);
+        } catch {
+          // The schema below returns the same safe validation message.
+        }
+        const parsed = orderSchema.safeParse(payload);
         if (!parsed.success) {
           return Response.json({ error: "Please check your name, phone number and cart." }, { status: 400 });
         }
